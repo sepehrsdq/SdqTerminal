@@ -1,0 +1,188 @@
+<Window x:Class="SdqTerminal.FontSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Settings"
+        Icon="/SdqTerminal;component/Assets/SdqTerminal.ico"
+        Width="900"
+        Height="740"
+        MinWidth="780"
+        MinHeight="660"
+        WindowStartupLocation="CenterOwner"
+        Background="#f4f5f7">
+    <Grid Margin="20">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <TextBlock Text="Settings" FontSize="25" FontWeight="SemiBold" Foreground="#182033" Margin="0,0,0,16"/>
+        <TabControl x:Name="SettingsTabs" Grid.Row="1" Margin="0,0,0,16">
+            <TabItem Header="General">
+                <Grid Margin="16">
+                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="135" />
+            </Grid.ColumnDefinitions>
+
+            <TabControl Margin="0,0,14,0">
+                <TabItem Header="Standard fonts">
+                    <DockPanel Margin="8">
+                        <TextBlock DockPanel.Dock="Top"
+                                   Margin="2,0,2,8"
+                                   Foreground="#586174"
+                                   TextWrapping="Wrap"
+                                   Text="Recommended fonts for CMD, PowerShell, terminals and coding that are installed on this Windows." />
+                        <ListBox x:Name="StandardFontListBox"
+                                 SelectionChanged="StandardFontListBox_SelectionChanged"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+                    </DockPanel>
+                </TabItem>
+                <TabItem Header="All installed fonts">
+                    <DockPanel Margin="8">
+                        <TextBox x:Name="FontSearchTextBox"
+                                 DockPanel.Dock="Top"
+                                 Margin="0,0,0,8"
+                                 Padding="7"
+                                 TextChanged="FontSearchTextBox_TextChanged" />
+                        <ListBox x:Name="FontListBox"
+                                 SelectionChanged="FontListBox_SelectionChanged"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+                    </DockPanel>
+                </TabItem>
+            </TabControl>
+
+            <StackPanel Grid.Column="1">
+                <TextBlock Text="Size"
+                           Margin="0,0,0,5" />
+                <ComboBox x:Name="FontSizeComboBox"
+                          IsEditable="True"
+                          SelectionChanged="FontOption_Changed"
+                          TextBoxBase.TextChanged="FontOption_Changed">
+                    <ComboBoxItem Content="8" />
+                    <ComboBoxItem Content="9" />
+                    <ComboBoxItem Content="10" />
+                    <ComboBoxItem Content="11" />
+                    <ComboBoxItem Content="12" />
+                    <ComboBoxItem Content="14" />
+                    <ComboBoxItem Content="15" />
+                    <ComboBoxItem Content="16" />
+                    <ComboBoxItem Content="18" />
+                    <ComboBoxItem Content="20" />
+                    <ComboBoxItem Content="22" />
+                    <ComboBoxItem Content="24" />
+                    <ComboBoxItem Content="28" />
+                    <ComboBoxItem Content="32" />
+                    <ComboBoxItem Content="36" />
+                    <ComboBoxItem Content="48" />
+                </ComboBox>
+
+                <CheckBox x:Name="BoldCheckBox"
+                          Content="Bold"
+                          Margin="0,18,0,8"
+                          Checked="FontOption_Changed"
+                          Unchecked="FontOption_Changed" />
+                <CheckBox x:Name="ItalicCheckBox"
+                          Content="Italic"
+                          Checked="FontOption_Changed"
+                          Unchecked="FontOption_Changed" />
+
+                <TextBlock Text="History lines"
+                           Margin="0,24,0,5" />
+                <ComboBox x:Name="HistorySizeComboBox"
+                          ToolTip="Maximum number of previous terminal lines kept in memory">
+                    <ComboBoxItem Content="2,000" Tag="2000" />
+                    <ComboBoxItem Content="5,000" Tag="5000" />
+                    <ComboBoxItem Content="10,000" Tag="10000" />
+                </ComboBox>
+                <TextBlock Margin="0,6,0,0"
+                           Foreground="#697386"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           Text="Larger history uses more memory and may make scrolling slower." />
+            </StackPanel>
+        </Grid>
+
+        <StackPanel Grid.Row="1" Margin="0,14,0,0">
+            <TextBlock Text="HTML preview range" Margin="0,0,0,5" />
+            <ComboBox x:Name="PreviewScopeComboBox">
+                <ComboBoxItem Content="Current page only" />
+                <ComboBoxItem Content="Two pages before the current view through the end" />
+                <ComboBoxItem Content="Entire available history" />
+            </ComboBox>
+            <TextBlock Text="Pane keyboard shortcuts" Margin="0,14,0,6" FontWeight="SemiBold" />
+            <CheckBox x:Name="SplitShortcutCheckBox" Content="Ctrl+Shift+D — Open a new pane" Margin="0,0,0,5" />
+            <CheckBox x:Name="NavigateShortcutCheckBox" Content="Ctrl+Shift+Left / Right — Switch panes" Margin="0,0,0,5" />
+            <CheckBox x:Name="CloseShortcutCheckBox" Content="Ctrl+Shift+W — Close the active pane (or its last tab)" />
+            <TextBlock Text="Disabled shortcuts are passed to the terminal. Ctrl+W is always passed through." Foreground="#697386" Margin="0,5,0,0" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <Border Grid.Row="2"
+                Background="#10151f"
+                CornerRadius="8"
+                Padding="16"
+                Margin="0,16,0,16">
+            <TextBlock x:Name="PreviewTextBlock"
+                       Foreground="#e6e6e6"
+                       TextWrapping="Wrap"
+                       Text="SdqTerminal  |  ترمینال فارسی  |  1234567890&#x0a;https://github.com/sepehrsdq" />
+        </Border>
+
+                </Grid>
+            </TabItem>
+            <TabItem x:Name="ThemeSettingsTab" Header="Theme">
+                <Grid Margin="16">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <StackPanel Margin="0,0,0,16">
+                        <TextBlock Text="Choose your theme" FontSize="20" FontWeight="SemiBold" Foreground="#182033" />
+                        <TextBlock Text="Use ↑ and ↓ to preview. Changes apply to all terminals only when you choose Apply."
+                                   Margin="0,6,0,0" Foreground="#586174" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="240"/><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <ListBox x:Name="ThemeListBox" SelectionChanged="ThemeListBox_SelectionChanged"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled" BorderBrush="#d0d5dd"
+                                 AutomationProperties.Name="Color themes">
+                            <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="Padding" Value="10,8"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/></Style></ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate><DataTemplate>
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <Border Width="22" Height="22" Background="{Binding Swatch}" BorderBrush="#a0a7b2" BorderThickness="1" CornerRadius="4" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontWeight="SemiBold"/><TextBlock Text="{Binding ModeLabel}" FontSize="11" Opacity="0.7" Margin="0,2,0,0"/></StackPanel>
+                                </Grid>
+                            </DataTemplate></ListBox.ItemTemplate>
+                        </ListBox>
+                        <Grid Grid.Column="2">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <TextBlock Text="Preview" FontWeight="SemiBold" Margin="0,0,0,8" Foreground="#344054"/>
+                            <Border x:Name="ThemePreviewBorder" Grid.Row="1" CornerRadius="8" BorderBrush="#b7bec9" BorderThickness="1" ClipToBounds="True">
+                                <DockPanel>
+                                    <Border x:Name="ThemePreviewTitleBar" DockPanel.Dock="Top" Padding="14,10" CornerRadius="7,7,0,0">
+                                        <TextBlock x:Name="ThemePreviewTitle" Text="›_  SdqTerminal" FontFamily="Segoe UI" FontSize="12"/>
+                                    </Border>
+                                    <StackPanel Margin="18">
+                                        <TextBlock x:Name="ThemePreviewHeading" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,18"/>
+                                        <TextBlock x:Name="ThemePreviewText" FontFamily="Consolas" FontSize="14" LineHeight="25" TextWrapping="Wrap"/>
+                                        <WrapPanel x:Name="ThemePreviewPalette" Margin="0,20,0,0"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                            <TextBlock Grid.Row="2" Text="Your tabs, panes and terminal output stay unchanged while you preview."
+                                       Foreground="#697386" FontSize="12" TextWrapping="Wrap" Margin="0,12,0,0"/>
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </TabItem>
+        </TabControl>
+        <StackPanel Grid.Row="2"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Width="96"
+                    Margin="0,0,8,0"
+                    Padding="8,5"
+                    Content="Cancel"
+                    IsCancel="True" />
+            <Button Width="90"
+                    Padding="8,5"
+                    Content="Apply"
+                    IsDefault="True"
+                    Click="ApplyButton_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

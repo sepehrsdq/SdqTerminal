@@ -1,0 +1,84 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <!-- Fluent-style indicator, with a fixed gutter to keep terminal columns stable. -->
+    <Style TargetType="ScrollBar">
+        <Style.Resources>
+            <!-- WPF Track uses half this metric as its minimum thumb length. -->
+            <sys:Double x:Key="{x:Static SystemParameters.VerticalScrollBarButtonHeightKey}">56</sys:Double>
+        </Style.Resources>
+        <Setter Property="Width" Value="12" />
+        <Setter Property="Background" Value="{DynamicResource ScrollTrackBrush}" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="Cursor" Value="Arrow" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollBar">
+                    <Grid Background="Transparent" Margin="0,2">
+                        <Border x:Name="Rail" CornerRadius="6" Opacity="0"
+                                Background="{TemplateBinding Background}" />
+                        <Track x:Name="PART_Track" Orientation="Vertical" IsDirectionReversed="True">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="ScrollBar.PageUpCommand" Focusable="False">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border Background="Transparent" />
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.DecreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb MinHeight="28" Focusable="False">
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <!-- The whole gutter remains draggable, even with a 2px indicator. -->
+                                            <Grid Background="Transparent">
+                                                <Border x:Name="Grip" Width="2" Margin="0,2" CornerRadius="3"
+                                                        HorizontalAlignment="Center"
+                                                        Background="{DynamicResource ScrollThumbBrush}" />
+                                            </Grid>
+                                            <ControlTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ScrollBar}}" Value="True">
+                                                    <Setter TargetName="Grip" Property="Width" Value="6" />
+                                                    <Setter TargetName="Grip" Property="Background" Value="{DynamicResource ScrollThumbHoverBrush}" />
+                                                </DataTrigger>
+                                                <Trigger Property="IsDragging" Value="True">
+                                                    <Setter TargetName="Grip" Property="Width" Value="6" />
+                                                    <Setter TargetName="Grip" Property="Background" Value="{DynamicResource ScrollThumbPressedBrush}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="ScrollBar.PageDownCommand" Focusable="False">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border Background="Transparent" />
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.IncreaseRepeatButton>
+                        </Track>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Rail" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="IsMouseCaptureWithin" Value="True">
+                            <Setter TargetName="Rail" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="PART_Track" Property="Visibility" Value="Hidden" />
+                            <Setter TargetName="Rail" Property="Opacity" Value="0" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>
