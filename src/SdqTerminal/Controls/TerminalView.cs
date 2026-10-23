@@ -1,0 +1,884 @@
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+namespace SdqTerminal;
+
+/// <summary>A cell-based terminal surface. Only visible rows are shaped and drawn.</summary>
+public sealed class TerminalView : ContentControl
+{
+    private readonly ScrollViewer _scroll;
+    private readonly Surface _surface;
+    private TerminalSnapshot? _snapshot;
+    private long _sourceScrollbackStart;
+    private bool _smartRtl;
+    private bool _rowRtl;
+    private double _cellWidth = 8.5, _lineHeight = 18;
+    private (int Row, int Offset)? _anchor, _end;
+    private bool _dragging;
+    private readonly Dictionary<int, RowLayout> _layouts = [];
+    private readonly Dictionary<TerminalLine, TerminalLine> _logicalLines = [];
+    private bool _appOwnsBidi;
+    private bool _alternateScreen;
+    private readonly Dictionary<TerminalColor, Brush> _brushes = [];
+    private string _fontKey = string.Empty;
+    private readonly Dictionary<(string Text, TerminalStyle Style, bool Link), FormattedText> _glyphCache = [];
+    private readonly List<SearchMatch> _searchMatches = [];
+    private string _searchQuery = string.Empty;
+    private int _searchIndex;
+    private Brush? _searchBrush, _searchCurrentBrush;
+    public int SearchMatchCount => _searchMatches.Count;
+    public int SearchMatchIndex => _searchMatches.Count == 0 ? 0 : _searchIndex + 1;
+    internal static readonly Regex Links = new(@"(?i)\b(?:https?://|www\.)[^\s<>{}\[\]""']+", RegexOptions.Compiled);
+    public event Action<Uri>? LinkRequested;
+    public bool HasSelection => _anchor is not null && _end is not null && _anchor != _end;
+    public bool IsSelecting => _dragging;
+    public double VerticalOffset => _scroll.VerticalOffset;
+    public double ViewportWidth => _scroll.ViewportWidth;
+    public double ViewportHeight => _scroll.ViewportHeight;
+    public bool IsUpdatingScroll { get; private set; }
+    public ((int Row, int Offset)? Anchor, (int Row, int Offset)? End) SelectionState
+    {
+        get => (_anchor, _end);
+        set { (_anchor, _end) = value; _surface.InvalidateVisual(); }
+    }
+
+    public TerminalView()
+    {
+        Resources.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri("/SdqTerminal;component/Controls/TerminalScrollBar.xaml", UriKind.Relative)
+        });
+        ApplyScrollBarColors();
+        Focusable = true;
+        HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        VerticalContentAlignment = VerticalAlignment.Stretch;
+        FocusVisualStyle = null;
+        _surface = new Surface(this) { VerticalAlignment = VerticalAlignment.Top };
+        _scroll = new ScrollViewer
+        {
+            Content = _surface,
+            // Reserve a stable gutter: history appearing must not resize the PTY.
+            VerticalScrollBarVisibility = ScrollBarVisibility.Visible,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            CanContentScroll = false,
+            VerticalContentAlignment = VerticalAlignment.Top,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Focusable = false
+        };
+        Content = _scroll;
+        _scroll.SetBinding(MarginProperty, new System.Windows.Data.Binding(nameof(Padding)) { Source = this });
+        _scroll.ScrollChanged += (_, e) =>
+        {
+            // Scrolling and history growth do not change existing row geometry.
+            if (e.ViewportWidthChange != 0) _layouts.Clear();
+            _surface.InvalidateVisual();
+        };
+        SizeChanged += (_, _) => { _layouts.Clear(); _surface.InvalidateVisual(); };
+        _surface.MouseLeftButtonDown += BeginSelection;
+        _surface.MouseMove += ExtendSelection;
+        _surface.AddHandler(Mouse.MouseMoveEvent, new MouseEventHandler((_, e) =>
+        {
+            var link = LinkAt(e.GetPosition(_surface));
+            _surface.ToolTip = link is null ? null : "Ctrl + Left Click to open link";
+            if (link is null) _surface.ClearValue(CursorProperty);
+            else _surface.Cursor = Cursors.Hand;
+        }), true);
+        _surface.MouseLeave += (_, _) => { _surface.ToolTip = null; _surface.ClearValue(CursorProperty); };
+        _surface.MouseLeftButtonUp += (_, e) =>
+        {
+            if (!_dragging) return;
+            _dragging = false;
+            _surface.ReleaseMouseCapture();
+            e.Handled = true;
+        };
+    }
+
+    public void Present(TerminalSnapshot snapshot, bool smartRtl, double cellWidth,
+        double lineHeight, bool followOutput, bool rowRtl = false)
+    {
+        // Reflow the presentation only; application cursor commands still target the VT grid.
+        var sourceStart = snapshot.ScrollbackStartIndex;
+        if (sourceStart != _sourceScrollbackStart) ClearSelection();
+        _sourceScrollbackStart = sourceStart;
+        snapshot = NormalizeVisualOrder(snapshot);
+        if (smartRtl) snapshot = TerminalWordWrap.Reflow(snapshot);
+        IsUpdatingScroll = true;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ContextIdle,
+            () => IsUpdatingScroll = false);
+        var trimmed = _snapshot is null ? 0 : snapshot.ScrollbackStartIndex - _snapshot.ScrollbackStartIndex;
+        if (_snapshot?.Modes.AlternateScreen != snapshot.Modes.AlternateScreen)
+            ClearSelection();
+        else if (trimmed > 0)
+        {
+            if (_anchor is { } a && _end is { } b && a.Row >= trimmed && b.Row >= trimmed)
+            { _anchor = (a.Row - (int)trimmed, a.Offset); _end = (b.Row - (int)trimmed, b.Offset); }
+            else ClearSelection();
+        }
+        var fontKey = $"{FontFamily.Source}|{FontSize}|{FontWeight}|{FontStyle}|{VisualTreeHelper.GetDpi(this).PixelsPerDip}";
+        var sameFrame = _snapshot is { } previous && trimmed == 0 &&
+            _smartRtl == smartRtl && _rowRtl == rowRtl && _cellWidth == cellWidth &&
+            _lineHeight == lineHeight && _fontKey == fontKey && previous.Modes == snapshot.Modes &&
+            previous.CursorVisible == snapshot.CursorVisible && previous.CursorRow == snapshot.CursorRow &&
+            previous.CursorColumn == snapshot.CursorColumn && previous.Lines.Count == snapshot.Lines.Count &&
+            previous.Lines.Zip(snapshot.Lines).All(pair => ReferenceEquals(pair.First, pair.Second) ||
+                pair.First.CellLength == pair.Second.CellLength && pair.First.WrappedFromPrevious == pair.Second.WrappedFromPrevious && pair.First.Runs.SequenceEqual(pair.Second.Runs));
+        if (trimmed != 0 || _smartRtl != smartRtl || _rowRtl != rowRtl || _cellWidth != cellWidth ||
+            _lineHeight != lineHeight || _fontKey != fontKey ||
+            _snapshot?.Modes.AlternateScreen != snapshot.Modes.AlternateScreen)
+            _layouts.Clear();
+        if (_fontKey != fontKey) _glyphCache.Clear();
+        _fontKey = fontKey;
+        _snapshot = snapshot;
+        _smartRtl = smartRtl;
+        _rowRtl = rowRtl;
+        _cellWidth = cellWidth;
+        _lineHeight = lineHeight;
+        _surface.Height = Math.Max(lineHeight, snapshot.Lines.Count * lineHeight);
+        if (!sameFrame) _surface.InvalidateVisual();
+        if (followOutput) _scroll.ScrollToEnd();
+        else if (trimmed > 0) _scroll.ScrollToVerticalOffset(Math.Max(0, VerticalOffset - trimmed * lineHeight));
+    }
+
+    /// <summary>
+    /// Returns the snapshot with application-owned RTL text restored to logical
+    /// order. Some full-screen tools (Claude Code) reorder Persian and Arabic
+    /// for display themselves; reversing their output again would mirror it.
+    /// </summary>
+    public TerminalSnapshot LogicalSnapshot(TerminalSnapshot snapshot) =>
+        _appOwnsBidi ? ConvertLines(snapshot) : snapshot;
+
+    private TerminalSnapshot NormalizeVisualOrder(TerminalSnapshot snapshot)
+    {
+        if (snapshot.Modes.AlternateScreen != _alternateScreen)
+        {
+            _alternateScreen = snapshot.Modes.AlternateScreen;
+            if (!_alternateScreen)
+            {
+                _appOwnsBidi = false;
+                _logicalLines.Clear();
+            }
+        }
+        if (_alternateScreen &&
+            snapshot.Title?.Contains("Claude Code", StringComparison.OrdinalIgnoreCase) == true)
+            _appOwnsBidi = true;
+        return _appOwnsBidi ? ConvertLines(snapshot) : snapshot;
+    }
+
+    private TerminalSnapshot ConvertLines(TerminalSnapshot snapshot)
+    {
+        if (_logicalLines.Count > 2048)
+            _logicalLines.Clear();
+        return snapshot with { Lines = snapshot.Lines.Select(ConvertLine).ToArray() };
+    }
+
+    private TerminalLine ConvertLine(TerminalLine line)
+    {
+        if (_logicalLines.TryGetValue(line, out var cached))
+            return cached;
+        var converted = SmartRtl.ToLogicalOrder(line);
+        _logicalLines[line] = converted;
+        return converted;
+    }
+
+    public string CreateHtmlPreview(HtmlPreviewScope scope = HtmlPreviewScope.CurrentPage)
+    {
+        if (_snapshot is null) return TerminalHtmlExporter.Create([], FontFamily.Source, FontSize, _lineHeight);
+        var first = Math.Max(0, (int)Math.Floor(VerticalOffset / _lineHeight));
+        var last = Math.Min(_snapshot.Lines.Count, (int)Math.Ceiling((VerticalOffset + ViewportHeight) / _lineHeight));
+        if (scope == HtmlPreviewScope.EntireHistory) { first = 0; last = _snapshot.Lines.Count; }
+        else if (scope == HtmlPreviewScope.RecentToEnd)
+        {
+            first = Math.Max(0, (int)Math.Floor((VerticalOffset - 2 * ViewportHeight) / _lineHeight));
+            last = _snapshot.Lines.Count;
+        }
+        return TerminalHtmlExporter.Create(_snapshot.Lines.Skip(first).Take(Math.Max(0, last - first)).ToArray(),
+            FontFamily.Source, FontSize, _lineHeight, FontWeight.ToOpenTypeWeight() >= 600, FontStyle != FontStyles.Normal);
+    }
+
+    // Case-insensitive search over the presented lines. Matches survive new output
+    // through RefreshSearch so the find bar keeps its place while a command runs.
+    public int Search(string query)
+    {
+        _searchQuery = query ?? string.Empty;
+        _searchIndex = 0;
+        CollectSearchMatches();
+        ScrollToSearchMatch();
+        _surface.InvalidateVisual();
+        return _searchMatches.Count;
+    }
+
+    public int RefreshSearch()
+    {
+        if (_searchQuery.Length == 0)
+            return 0;
+        var index = _searchIndex;
+        CollectSearchMatches();
+        _searchIndex = _searchMatches.Count == 0 ? 0 : Math.Clamp(index, 0, _searchMatches.Count - 1);
+        _surface.InvalidateVisual();
+        return _searchMatches.Count;
+    }
+
+    public int StepSearch(int direction)
+    {
+        if (_searchMatches.Count == 0)
+            return 0;
+        _searchIndex = (_searchIndex + direction + _searchMatches.Count) % _searchMatches.Count;
+        ScrollToSearchMatch();
+        _surface.InvalidateVisual();
+        return _searchIndex + 1;
+    }
+
+    public void ClearSearch()
+    {
+        if (_searchQuery.Length == 0 && _searchMatches.Count == 0)
+            return;
+        _searchQuery = string.Empty;
+        _searchMatches.Clear();
+        _searchIndex = 0;
+        _surface.InvalidateVisual();
+    }
+
+    private void CollectSearchMatches()
+    {
+        _searchMatches.Clear();
+        if (_snapshot is null || _searchQuery.Length == 0)
+            return;
+        for (var row = 0; row < _snapshot.Lines.Count; row++)
+        {
+            var text = Text(_snapshot.Lines[row]);
+            var offset = 0;
+            while (offset <= text.Length - _searchQuery.Length)
+            {
+                var found = text.IndexOf(_searchQuery, offset, StringComparison.OrdinalIgnoreCase);
+                if (found < 0)
+                    break;
+                _searchMatches.Add(new SearchMatch(row, found, _searchQuery.Length));
+                offset = found + Math.Max(1, _searchQuery.Length);
+            }
+        }
+    }
+
+    private void ScrollToSearchMatch()
+    {
+        if (_searchMatches.Count == 0)
+            return;
+        var row = _searchMatches[_searchIndex].Row;
+        _scroll.ScrollToVerticalOffset(Math.Max(0,
+            row * _lineHeight - Math.Max(0, (ViewportHeight - _lineHeight) / 2)));
+    }
+
+    private Brush SearchBrushFor(bool current) => current
+        ? _searchCurrentBrush ??= Freeze(new SolidColorBrush(AppTheme.SearchCurrent))
+        : _searchBrush ??= Freeze(new SolidColorBrush(AppTheme.SearchHighlight));
+
+    private static Brush Freeze(Brush brush)
+    {
+        brush.Freeze();
+        return brush;
+    }
+
+    private readonly record struct SearchMatch(int Row, int Start, int Length);
+
+    public void RefreshTheme()
+    {
+        ApplyScrollBarColors();
+        _layouts.Clear();
+        _glyphCache.Clear();
+        _searchBrush = null;
+        _searchCurrentBrush = null;
+        _surface.InvalidateVisual();
+    }
+
+    // Kept on the view itself so the scrollbar is themed without application resources.
+    private void ApplyScrollBarColors()
+    {
+        Resources["ScrollTrackBrush"] = new SolidColorBrush(AppTheme.ScrollTrack);
+        Resources["ScrollThumbBrush"] = new SolidColorBrush(AppTheme.ScrollThumb);
+        Resources["ScrollThumbHoverBrush"] = new SolidColorBrush(AppTheme.ScrollThumbHover);
+        Resources["ScrollThumbPressedBrush"] = new SolidColorBrush(AppTheme.ScrollThumbPressed);
+    }
+
+    public void Clear()
+    {
+        _snapshot = null;
+        _layouts.Clear();
+        _surface.Height = _lineHeight;
+        ClearSelection();
+        _surface.InvalidateVisual();
+    }
+
+    public void ScrollToVerticalOffset(double offset) => _scroll.ScrollToVerticalOffset(offset);
+    public bool TryGetGridCell(MouseEventArgs e, out int x, out int y)
+    {
+        var point = e.GetPosition(_surface);
+        x = GetLogicalColumn((int)Math.Floor(point.Y / _lineHeight), point.X) + 1;
+        y = (int)Math.Floor(point.Y / _lineHeight) - (_snapshot?.ScrollbackCount ?? 0) + 1;
+        return point.X >= 0 && point.X < ViewportWidth && point.Y >= VerticalOffset &&
+            point.Y < VerticalOffset + ViewportHeight && y > 0;
+    }
+
+    private int GetLogicalColumn(int row, double visualX)
+    {
+        var physicalColumn = (int)Math.Floor(visualX / _cellWidth);
+        if (_snapshot is null || row < 0 || row >= _snapshot.Lines.Count ||
+            (!_snapshot.Lines[row].ContainsRightToLeft && !_rowRtl))
+            return physicalColumn;
+        // An application that mirrors text itself also report clicks in its own
+        // grid, so the cell the user pointed at is the cell it expects.
+        if (_snapshot.Lines[row].ParagraphStart is not null)
+            return physicalColumn;
+
+        // TUI applications receive logical terminal columns, not the positions
+        // after bidi layout. Use the same shaped cells as local selection.
+        var layout = Layout(row);
+        var hit = layout.Cells.FirstOrDefault(cell => cell.Width > 0 &&
+            visualX >= cell.X && visualX < cell.X + cell.Width);
+        if (hit is null) return physicalColumn;
+        var column = 0;
+        foreach (var cell in layout.Cells.OrderBy(cell => cell.Start))
+        {
+            var columns = (int)Math.Round(cell.GridWidth / _cellWidth);
+            if (ReferenceEquals(cell, hit))
+            {
+                var fraction = (visualX - cell.X) / cell.Width;
+                if (cell.Rtl) fraction = 1 - fraction;
+                return column + Math.Clamp((int)(fraction * columns), 0, Math.Max(0, columns - 1));
+            }
+            column += columns;
+        }
+        return physicalColumn;
+    }
+    public void ClearSelection() { _anchor = _end = null; _surface.InvalidateVisual(); }
+    public void SelectAll()
+    {
+        if (_snapshot is not { Lines.Count: > 0 } snapshot) return;
+        _anchor = (0, 0);
+        _end = (snapshot.Lines.Count - 1, Text(snapshot.Lines[^1]).Length);
+        _surface.InvalidateVisual();
+    }
+
+    public void CopySelection()
+    {
+        if (!HasSelection || _snapshot is null) return;
+        Clipboard.SetDataObject(GetSelectedText(), true);
+        ClearSelection();
+    }
+
+    public string GetSelectedText()
+    {
+        if (!HasSelection || _snapshot is null) return string.Empty;
+        var (start, end) = SelectionRange();
+        var result = new StringBuilder();
+        for (var row = start.Row; row <= end.Row && row < _snapshot.Lines.Count; row++)
+        {
+            var text = Text(_snapshot.Lines[row]);
+            var from = row == start.Row ? Math.Min(start.Offset, text.Length) : 0;
+            var to = row == end.Row ? Math.Min(end.Offset, text.Length) : text.Length;
+            if (row > start.Row && !_snapshot.Lines[row].WrappedFromPrevious) result.AppendLine();
+            result.Append(text[from..Math.Max(from, to)]);
+        }
+        return result.ToString();
+    }
+
+    private ((int Row, int Offset) Start, (int Row, int Offset) End) SelectionRange()
+    {
+        var a = _anchor!.Value; var b = _end!.Value;
+        return a.Row < b.Row || a.Row == b.Row && a.Offset <= b.Offset ? (a, b) : (b, a);
+    }
+
+    public bool IsLinkAt(MouseEventArgs e) => LinkAt(e.GetPosition(_surface)) is not null;
+
+    private Uri? LinkAt(Point point)
+    {
+        if (_snapshot is null || point.Y < VerticalOffset || point.Y >= VerticalOffset + ViewportHeight ||
+            point.X < 0 || point.X >= ViewportWidth) return null;
+        var row = (int)(point.Y / _lineHeight);
+        if (row < 0 || row >= _snapshot.Lines.Count) return null;
+        var layout = Layout(row);
+        var cell = layout.Cells.FirstOrDefault(cell => point.X >= cell.X && point.X < cell.X + cell.Width);
+        if (cell is null || cell.Style.Hidden) return null;
+        foreach (Match match in Links.Matches(layout.Text))
+        {
+            var address = match.Value.TrimEnd('.', ',', ';', ':', '!', '?', ')');
+            if (cell.Start < match.Index || cell.Start >= match.Index + address.Length) continue;
+            if (address.StartsWith("www.", StringComparison.OrdinalIgnoreCase)) address = "https://" + address;
+            if (Uri.TryCreate(address, UriKind.Absolute, out var uri)) return uri;
+        }
+        return null;
+    }
+
+    private void BeginSelection(object sender, MouseButtonEventArgs e)
+    {
+        Focus();
+        var hit = Hit(e.GetPosition(_surface));
+        if (hit is null) return;
+        if ((Keyboard.Modifiers & ModifierKeys.Control) != 0 && LinkAt(e.GetPosition(_surface)) is { } uri)
+        {
+            LinkRequested?.Invoke(uri);
+            e.Handled = true;
+            return;
+        }
+        _anchor = _end = hit;
+        if (e.ClickCount == 2 && _snapshot is not null)
+        {
+            var text = Text(_snapshot.Lines[hit.Value.Row]);
+            var start = Math.Min(hit.Value.Offset, text.Length); var end = start;
+            while (start > 0 && !char.IsWhiteSpace(text[start - 1])) start--;
+            while (end < text.Length && !char.IsWhiteSpace(text[end])) end++;
+            _anchor = (hit.Value.Row, start); _end = (hit.Value.Row, end);
+        }
+        _dragging = true;
+        _surface.CaptureMouse();
+        _surface.InvalidateVisual();
+        e.Handled = true;
+    }
+
+    private void ExtendSelection(object sender, MouseEventArgs e)
+    {
+        if (!_dragging || e.LeftButton != MouseButtonState.Pressed) return;
+        var point = e.GetPosition(_surface);
+        if (point.Y < VerticalOffset) _scroll.ScrollToVerticalOffset(VerticalOffset - _lineHeight);
+        if (point.Y > VerticalOffset + _scroll.ViewportHeight) _scroll.ScrollToVerticalOffset(VerticalOffset + _lineHeight);
+        _end = Hit(point);
+        _surface.InvalidateVisual();
+        e.Handled = true;
+    }
+
+    private (int Row, int Offset)? Hit(Point point)
+    {
+        if (_snapshot is not { Lines.Count: > 0 }) return null;
+        var row = Math.Clamp((int)(point.Y / _lineHeight), 0, _snapshot.Lines.Count - 1);
+        var layout = Layout(row);
+        var closest = layout.Cells.FirstOrDefault(cell => point.X >= cell.X && point.X < cell.X + cell.Width)
+            ?? layout.Cells.MinBy(cell => Math.Abs(cell.X + cell.Width / 2 - point.X));
+        if (closest is null) return (row, 0);
+        var after = point.X >= closest.X + closest.Width / 2;
+        return (row, (after != closest.Rtl) ? closest.Start + closest.Length : closest.Start);
+    }
+
+    private RowLayout Layout(int row)
+    {
+        var line = _snapshot!.Lines[row];
+        // Screen snapshots recreate line objects even when their contents are unchanged.
+        if (_layouts.TryGetValue(row, out var cached) &&
+            cached.Source.BaseRightToLeft == line.BaseRightToLeft &&
+            cached.Source.ParagraphStart == line.ParagraphStart &&
+            cached.Source.ParagraphEnd == line.ParagraphEnd &&
+            (ReferenceEquals(cached.Source, line) ||
+             cached.Source.CellLength == line.CellLength && cached.Source.Runs.SequenceEqual(line.Runs)))
+            return cached;
+        var text = Text(line);
+        var rightAlign = _rowRtl || SmartRtl.ShouldRightAlign(line, _smartRtl, _snapshot.Modes.AlternateScreen);
+        // Paragraph direction is independent of screen-grid alignment. Shaping
+        // Arabic/Persian spans remains active even when Smart RTL is disabled.
+        var baseRtl = line.BaseRightToLeft ?? (_rowRtl || (_smartRtl && line.ContainsRightToLeft));
+        // Text an application reordered for display keeps its own columns: only
+        // the paragraph it mirrored takes part in bidi layout, so prompt marks
+        // and padding stay where the application put them.
+        var paragraphStart = line.ParagraphStart ?? 0;
+        var paragraphEnd = line.ParagraphEnd ?? text.Length;
+        var paragraph = text[paragraphStart..paragraphEnd];
+        DirectionalSpan[] spans = paragraph.Length == 0
+            ? []
+            : line.ContainsRightToLeft
+                ? SmartRtl.GetDirectionalSpans(paragraph, baseRtl)
+                    .Select(span => span with { Start = span.Start + paragraphStart }).ToArray()
+                : [new DirectionalSpan(paragraphStart, paragraph.Length, false)];
+        var orderedSpans = new List<DirectionalSpan>(spans.Length + 2);
+        if (paragraphStart > 0) orderedSpans.Add(new DirectionalSpan(0, paragraphStart, false));
+        orderedSpans.AddRange(baseRtl ? spans.Reverse() : spans);
+        if (paragraphEnd < text.Length) orderedSpans.Add(new DirectionalSpan(paragraphEnd, text.Length - paragraphEnd, false));
+        var cells = new List<DrawCell>();
+        var glyphs = new List<DrawGlyph>();
+        var widths = new List<(int Start, int Length, int Width)>();
+        var enumerator = StringInfo.GetTextElementEnumerator(text);
+        while (enumerator.MoveNext())
+        {
+            var element = enumerator.GetTextElement();
+            widths.Add((enumerator.ElementIndex, element.Length,
+                element.EnumerateRunes().Max(TerminalBuffer.GetCellWidth)));
+        }
+        var totalWidth = widths.Sum(item => item.Width) * _cellWidth;
+        var x = rightAlign ? Math.Max(0, _scroll.ViewportWidth - totalWidth) : 0;
+        foreach (var span in orderedSpans)
+        {
+            var members = widths.Where(item => item.Start >= span.Start && item.Start < span.Start + span.Length).ToArray();
+            var spanWidth = members.Sum(item => item.Width) * _cellWidth;
+            var advance = 0.0;
+            foreach (var member in members)
+            {
+                var width = member.Width * _cellWidth;
+                var cellX = x + (span.IsRightToLeft ? spanWidth - advance - width : advance);
+                var style = StyleAt(line, member.Start);
+                cells.Add(new DrawCell(member.Start, member.Length, cellX, width, span.IsRightToLeft, style));
+                advance += width;
+                // Latin and box-drawing glyphs are positioned at exact cell boundaries.
+                if (!span.IsRightToLeft && width > 0)
+                    glyphs.Add(new DrawGlyph(text.Substring(member.Start, member.Length), cellX, width, false, member.Start, style));
+            }
+            // Keep word separators at terminal-cell width. Shaping an entire padded
+            // row scales its spaces along with proportional Arabic fallback glyphs.
+            // Words still span ANSI style boundaries, preserving Arabic joining.
+            if (span.IsRightToLeft && members.Length > 0)
+            {
+                for (var i = 0; i < members.Length;)
+                {
+                    var start = i++;
+                    var whitespace = char.IsWhiteSpace(text[members[start].Start]);
+                    while (i < members.Length && char.IsWhiteSpace(text[members[i].Start]) == whitespace) i++;
+                    var firstOffset = members[start].Start;
+                    var endOffset = members[i - 1].Start + members[i - 1].Length;
+                    var segment = cells.Where(cell => cell.Start >= firstOffset && cell.Start < endOffset).ToArray();
+                    glyphs.Add(new DrawGlyph(text.Substring(firstOffset, endOffset - firstOffset),
+                        segment.Min(cell => cell.X), segment.Sum(cell => cell.Width), true,
+                        firstOffset, StyleAt(line, firstOffset)));
+                }
+            }
+            x += spanWidth;
+        }
+        var result = new RowLayout(line, text, cells, glyphs);
+        _layouts[row] = result;
+        return result;
+    }
+
+    private static TerminalStyle StyleAt(TerminalLine line, int offset)
+    {
+        foreach (var run in line.Runs) { if (offset < run.Text.Length) return run.Style; offset -= run.Text.Length; }
+        return default;
+    }
+    private static string Text(TerminalLine line) => string.Concat(line.Runs.Select(run => run.Text));
+    private Brush BrushFor(TerminalColor color)
+    {
+        if (_brushes.TryGetValue(color, out var cached)) return cached;
+        if (_brushes.Count >= 1024) _brushes.Clear();
+        var brush = new SolidColorBrush(Color.FromRgb(color.Red, color.Green, color.Blue));
+        brush.Freeze();
+        _brushes[color] = brush;
+        return brush;
+    }
+    internal static (TerminalColor Foreground, TerminalColor Background) Colors(TerminalStyle style)
+    {
+        var fg = style.Foreground is { } foreground ? AppTheme.MapForeground(foreground, style.ForegroundPaletteIndex) : AppTheme.DefaultForeground;
+        var bg = style.Background is { } background ? AppTheme.MapBackground(background, style.BackgroundPaletteIndex) : AppTheme.DefaultBackground;
+        if (style.Inverse) (fg, bg) = (bg, fg);
+        if (style.Dim) fg = new((byte)(fg.Red * .55 + bg.Red * .45), (byte)(fg.Green * .55 + bg.Green * .45), (byte)(fg.Blue * .55 + bg.Blue * .45));
+        if (style.Hidden) fg = bg;
+        return (fg, bg);
+    }
+
+    private void Draw(DrawingContext dc)
+    {
+        if (_snapshot is null) { _surface.RetainRows(0, 0); return; }
+        var top = VerticalOffset;
+        _surface.SetViewport(new Rect(0, top, Math.Max(0, _scroll.ViewportWidth), Math.Max(0, _scroll.ViewportHeight)), Background);
+        dc.PushClip(new RectangleGeometry(new Rect(0, top, Math.Max(0, _scroll.ViewportWidth), Math.Max(0, _scroll.ViewportHeight))));
+        var first = Math.Max(0, (int)(top / _lineHeight));
+        var last = Math.Min(_snapshot.Lines.Count, (int)Math.Ceiling((top + _scroll.ViewportHeight) / _lineHeight) + 1);
+        // Keep recently shaped rows around the viewport, without shaping unseen rows.
+        // The bounded cache avoids repeating Persian shaping on small scroll reversals.
+        var cacheMargin = Math.Max(64, 3 * (last - first));
+        foreach (var key in _layouts.Keys.Where(key => key < first - cacheMargin || key >= last + cacheMargin).ToArray()) _layouts.Remove(key);
+        _surface.RetainRows(first, last);
+        for (var row = first; row < last; row++)
+        {
+            var layout = Layout(row); var y = row * _lineHeight;
+            if (layout.Drawing is null)
+            {
+                var drawing = new DrawingGroup();
+                // Graphics use hard, adjoining cell edges; text keeps its own antialiasing.
+                RenderOptions.SetEdgeMode(drawing, EdgeMode.Aliased);
+                using (var rowContext = drawing.Open()) DrawRow(rowContext, layout);
+                if (drawing.CanFreeze) drawing.Freeze();
+                layout.Drawing = drawing;
+            }
+            _surface.SetRow(row, layout.Drawing, y);
+            if (HasSelection)
+            {
+                var (start, end) = SelectionRange();
+                if (row >= start.Row && row <= end.Row)
+                    foreach (var cell in layout.Cells.Where(cell => (row != start.Row || cell.Start + cell.Length > start.Offset) && (row != end.Row || cell.Start < end.Offset)))
+                        dc.DrawRectangle(new SolidColorBrush(Color.FromArgb(100, 70, 125, 200)), null, new Rect(cell.X, y, cell.Width, _lineHeight));
+            }
+            for (var matchIndex = 0; matchIndex < _searchMatches.Count; matchIndex++)
+            {
+                var match = _searchMatches[matchIndex];
+                if (match.Row != row)
+                    continue;
+                var matched = layout.Cells
+                    .Where(cell => cell.Start < match.Start + match.Length &&
+                        cell.Start + cell.Length > match.Start)
+                    .ToArray();
+                if (matched.Length == 0)
+                    continue;
+                var left = matched.Min(cell => cell.X);
+                var right = matched.Max(cell => cell.X + cell.Width);
+                dc.DrawRoundedRectangle(SearchBrushFor(matchIndex == _searchIndex), null,
+                    new Rect(left, y + 1, Math.Max(1, right - left), _lineHeight - 2), 2, 2);
+            }
+            if (_snapshot.CursorVisible && row == _snapshot.CursorRow)
+            {
+                var column = 0; DrawCell? cursor = null;
+                foreach (var cell in layout.Cells.OrderBy(cell => cell.Start))
+                { if (_snapshot.CursorColumn >= column && _snapshot.CursorColumn < column + cell.GridWidth / _cellWidth) { cursor = cell; break; } column += (int)Math.Round(cell.GridWidth / _cellWidth); }
+                var rect = new Rect(cursor?.X ?? _snapshot.CursorColumn * _cellWidth, y, Math.Max(_cellWidth, cursor?.Width ?? _cellWidth), _lineHeight);
+                dc.DrawRectangle(new SolidColorBrush(AppTheme.CursorFill), new Pen(new SolidColorBrush(AppTheme.CursorBorder), 1), rect);
+            }
+        }
+        dc.Pop();
+    }
+    private void DrawRow(DrawingContext dc, RowLayout layout)
+    {
+        const double y = 0;
+        // Merge adjacent backgrounds: fewer draw calls and no fractional-cell seams.
+        var ordered = layout.Cells.OrderBy(cell => cell.X).ToArray();
+        for (var index = 0; index < ordered.Length;)
+        {
+            var cell = ordered[index++];
+            var color = Colors(cell.Style).Background;
+            var right = cell.X + cell.Width;
+            while (index < ordered.Length && Math.Abs(ordered[index].X - right) < .01 &&
+                Colors(ordered[index].Style).Background == color)
+            {
+                right = ordered[index].X + ordered[index].Width;
+                index++;
+            }
+            dc.DrawRectangle(BrushFor(color), null, new Rect(cell.X, y, right - cell.X, _lineHeight));
+        }
+        var links = Links.Matches(layout.Text);
+        foreach (var glyph in layout.Glyphs)
+        {
+            // Spaces already have their backgrounds painted. Only decorated spaces
+            // need a text drawing; TUI panels can contain thousands of plain spaces.
+            if (glyph.Text == " " && !glyph.Style.Underline && !glyph.Style.Strikethrough &&
+                !links.Cast<Match>().Any(link => glyph.Start >= link.Index && glyph.Start < link.Index + link.Length))
+                continue;
+            if (DrawBlock(dc, glyph, y) || DrawBox(dc, glyph, y)) continue;
+            var formatted = glyph.Formatted;
+            var cacheable = !glyph.Rtl && glyph.Text.Length == 1;
+            var isLink = links.Cast<Match>().Any(link => glyph.Start >= link.Index && glyph.Start < link.Index + link.Length);
+            var glyphKey = (glyph.Text, glyph.Style, isLink);
+            if (formatted is null && cacheable) _glyphCache.TryGetValue(glyphKey, out formatted);
+            if (formatted is null)
+            {
+            formatted = new FormattedText(glyph.Text, CultureInfo.CurrentCulture,
+                glyph.Rtl ? FlowDirection.RightToLeft : FlowDirection.LeftToRight,
+                new Typeface(glyph.Text.EnumerateRunes().Any(rune => rune.Value >= 0x1f000)
+                    ? new FontFamily("Segoe UI Emoji") : FontFamily, glyph.Style.Italic ? FontStyles.Italic : FontStyle,
+                    glyph.Style.Bold ? FontWeights.Bold : FontWeight, FontStretch), FontSize,
+                BrushFor(Colors(glyph.Style).Foreground), VisualTreeHelper.GetDpi(this).PixelsPerDip);
+            for (var index = 0; index < glyph.Text.Length;)
+            {
+                var style = StyleAt(layout.Source, glyph.Start + index);
+                var end = index + 1;
+                while (end < glyph.Text.Length && StyleAt(layout.Source, glyph.Start + end) == style) end++;
+                formatted.SetForegroundBrush(BrushFor(Colors(style).Foreground), index, end - index);
+                formatted.SetFontWeight(style.Bold ? FontWeights.Bold : FontWeight, index, end - index);
+                formatted.SetFontStyle(style.Italic ? FontStyles.Italic : FontStyle, index, end - index);
+                var decorations = new TextDecorationCollection();
+                if (style.Underline) decorations.Add(TextDecorations.Underline[0]);
+                if (style.Strikethrough) decorations.Add(TextDecorations.Strikethrough[0]);
+                formatted.SetTextDecorations(decorations, index, end - index);
+                index = end;
+            }
+            foreach (Match link in links)
+            {
+                var start = Math.Max(glyph.Start, link.Index); var end = Math.Min(glyph.Start + glyph.Text.Length, link.Index + link.Length);
+                if (end <= start) continue;
+                if (glyph.Style.Hidden) continue;
+                formatted.SetForegroundBrush(Brushes.CornflowerBlue, start - glyph.Start, end - start);
+                formatted.SetTextDecorations(TextDecorations.Underline, start - glyph.Start, end - start);
+            }
+            glyph.Formatted = formatted;
+            if (cacheable)
+            {
+                if (_glyphCache.Count >= 2048) _glyphCache.Clear();
+                _glyphCache[glyphKey] = formatted;
+            }
+            }
+            glyph.Formatted = formatted;
+            // Italic ink can extend past its advance width (notably f and j).
+            // Preserve that overhang; the surface still clips to the viewport.
+            var overhang = glyph.Style.Italic || FontStyle != FontStyles.Normal ? FontSize / 2 : 0;
+            dc.PushClip(new RectangleGeometry(new Rect(glyph.X - overhang, y, glyph.Width + 2 * overhang, _lineHeight)));
+            var scale = glyph.Rtl && formatted.WidthIncludingTrailingWhitespace > 0 ? glyph.Width / formatted.WidthIncludingTrailingWhitespace : 1;
+            var origin = glyph.Rtl ? glyph.X + glyph.Width : glyph.X;
+            if (glyph.Rtl && !string.IsNullOrWhiteSpace(glyph.Text))
+            {
+                // Selection, links and caret use the same shaped glyph positions
+                // that DrawText uses, including ligatures and variable-width letters.
+                for (var i = 0; i < layout.Cells.Count; i++)
+                {
+                    var cell = layout.Cells[i];
+                    if (cell.Start < glyph.Start || cell.Start >= glyph.Start + glyph.Text.Length) continue;
+                    var geometry = formatted.BuildHighlightGeometry(new Point(origin, 0), cell.Start - glyph.Start, cell.Length);
+                    if (geometry is null || geometry.Bounds.IsEmpty) continue;
+                    var bounds = geometry.Bounds;
+                    layout.Cells[i] = cell with { X = origin + (bounds.Left - origin) * scale, Width = bounds.Width * scale };
+                }
+            }
+            dc.PushTransform(new ScaleTransform(scale, 1, origin, y));
+            dc.DrawText(formatted, new Point(origin, y + Math.Max(0, (_lineHeight - formatted.Height) / 2)));
+            dc.Pop(); dc.Pop();
+        }
+        foreach (var hidden in layout.Cells.Where(cell => cell.Style.Hidden))
+            dc.DrawRectangle(BrushFor(Colors(hidden.Style).Background), null,
+                new Rect(hidden.X, y, hidden.Width, _lineHeight));
+    }
+
+    private sealed class Surface : FrameworkElement
+    {
+        private readonly TerminalView _owner;
+        private readonly VisualCollection _visuals;
+        private readonly DrawingVisual _background = new(), _overlay = new();
+        private readonly Dictionary<int, (DrawingVisual Visual, DrawingGroup Drawing, double Y)> _rows = [];
+        private Rect _viewport = Rect.Empty;
+        private Brush? _backgroundBrush;
+        private bool _pending;
+        public int RowDrawCount { get; private set; }
+
+        public Surface(TerminalView owner)
+        {
+            _owner = owner;
+            _visuals = new VisualCollection(this) { _background, _overlay };
+        }
+        protected override int VisualChildrenCount => _visuals.Count;
+        protected override Visual GetVisualChild(int index) => _visuals[index];
+
+        // Retain each row independently so a cursor or spinner does not dirty every row.
+        public new void InvalidateVisual()
+        {
+            if (_pending) return;
+            _pending = true;
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render, () =>
+            {
+                _pending = false;
+                using var dc = _overlay.RenderOpen();
+                _owner.Draw(dc);
+            });
+        }
+        public void SetViewport(Rect viewport, Brush background)
+        {
+            if (_viewport == viewport && ReferenceEquals(background, _backgroundBrush)) return;
+            _viewport = viewport;
+            _backgroundBrush = background;
+            Clip = new RectangleGeometry(viewport);
+            using var dc = _background.RenderOpen();
+            dc.DrawRectangle(background, null, viewport);
+        }
+        public void RetainRows(int first, int last)
+        {
+            foreach (var row in _rows.Keys.Where(row => row < first || row >= last).ToArray())
+            {
+                _visuals.Remove(_rows[row].Visual);
+                _rows.Remove(row);
+            }
+        }
+        public void SetRow(int row, DrawingGroup drawing, double y)
+        {
+            var exists = _rows.TryGetValue(row, out var old);
+            var visual = exists ? old.Visual : new DrawingVisual();
+            if (!exists) _visuals.Insert(_visuals.Count - 1, visual);
+            if (!exists || old.Y != y) visual.Transform = new TranslateTransform(0, y);
+            if (!exists || !ReferenceEquals(old.Drawing, drawing))
+            {
+                using var dc = visual.RenderOpen();
+                dc.DrawDrawing(drawing);
+                RowDrawCount++;
+            }
+            _rows[row] = (visual, drawing, y);
+        }
+    }
+    private sealed record DrawCell(int Start, int Length, double X, double Width, bool Rtl, TerminalStyle Style)
+    {
+        public double GridWidth { get; init; } = Width;
+    }
+    private sealed record DrawGlyph(string Text, double X, double Width, bool Rtl, int Start, TerminalStyle Style)
+    {
+        public FormattedText? Formatted { get; set; }
+    }
+    private sealed record RowLayout(TerminalLine Source, string Text, List<DrawCell> Cells, List<DrawGlyph> Glyphs)
+    {
+        public DrawingGroup? Drawing { get; set; }
+    }
+
+    private bool DrawBlock(DrawingContext dc, DrawGlyph glyph, double y)
+    {
+        if (glyph.Text.Length != 1 || glyph.Text[0] is < '\u2580' or > '\u259f') return false;
+        var code = glyph.Text[0];
+        var (foreground, background) = Colors(glyph.Style);
+        var brush = BrushFor(foreground);
+        void Fill(double left, double top, double width, double height) =>
+            dc.DrawRectangle(brush, null, new Rect(glyph.X + left * glyph.Width,
+                y + top * _lineHeight, width * glyph.Width, height * _lineHeight));
+
+        if (code == '\u2580') Fill(0, 0, 1, .5);
+        else if (code <= '\u2588')
+        {
+            var height = (code - 0x2580) / 8.0;
+            Fill(0, 1 - height, 1, height);
+        }
+        else if (code <= '\u258f') Fill(0, 0, (0x2590 - code) / 8.0, 1);
+        else if (code == '\u2590') Fill(.5, 0, .5, 1);
+        else if (code <= '\u2593')
+        {
+            var amount = (code - 0x2590) / 4.0;
+            byte Blend(byte fg, byte bg) => (byte)Math.Round(fg * amount + bg * (1 - amount));
+            brush = BrushFor(new TerminalColor(Blend(foreground.Red, background.Red),
+                Blend(foreground.Green, background.Green), Blend(foreground.Blue, background.Blue)));
+            Fill(0, 0, 1, 1);
+        }
+        else if (code == '\u2594') Fill(0, 0, 1, .125);
+        else if (code == '\u2595') Fill(.875, 0, .125, 1);
+        else
+        {
+            // Quadrants: upper-left, upper-right, lower-left, lower-right.
+            var mask = code switch
+            {
+                '\u2596' => 4, '\u2597' => 8, '\u2598' => 1, '\u2599' => 13,
+                '\u259a' => 9, '\u259b' => 7, '\u259c' => 11, '\u259d' => 2,
+                '\u259e' => 6, '\u259f' => 14, _ => 0
+            };
+            for (var quadrant = 0; quadrant < 4; quadrant++)
+                if ((mask & (1 << quadrant)) != 0)
+                    Fill((quadrant % 2) * .5, (quadrant / 2) * .5, .5, .5);
+        }
+        return true;
+    }
+
+    private bool DrawBox(DrawingContext dc, DrawGlyph glyph, double y)
+    {
+        // Edges meet at cell boundaries regardless of font metrics or DPI.
+        var edges = glyph.Text switch
+        {
+            "─" or "━" or "═" => 3,
+            "│" or "┃" or "║" => 12,
+            "┌" or "┏" or "╔" or "╭" => 10,
+            "┐" or "┓" or "╗" or "╮" => 9,
+            "└" or "┗" or "╚" or "╰" => 6,
+            "┘" or "┛" or "╝" or "╯" => 5,
+            "├" or "┣" or "╠" => 14,
+            "┤" or "┫" or "╣" => 13,
+            "┬" or "┳" or "╦" => 11,
+            "┴" or "┻" or "╩" => 7,
+            "┼" or "╋" or "╬" => 15,
+            _ => 0
+        };
+        if (edges == 0) return false;
+        var foreground = BrushFor(Colors(glyph.Style).Foreground);
+        var pen = new Pen(foreground, glyph.Text is "━" or "┃" or "┏" or "┓" or "┗" or "┛" or "┣" or "┫" or "┳" or "┻" or "╋" ? 2 : 1);
+        var middle = new Point(glyph.X + glyph.Width / 2, y + _lineHeight / 2);
+        double[] offsets = "═║╔╗╚╝╠╣╦╩╬".Contains(glyph.Text, StringComparison.Ordinal) ? [-1.5, 1.5] : [0];
+        foreach (var offset in offsets)
+        {
+            if ((edges & 1) != 0) dc.DrawLine(pen, new Point(glyph.X, middle.Y + offset), new Point(middle.X + offset, middle.Y + offset));
+            if ((edges & 2) != 0) dc.DrawLine(pen, new Point(middle.X + offset, middle.Y + offset), new Point(glyph.X + glyph.Width, middle.Y + offset));
+            if ((edges & 4) != 0) dc.DrawLine(pen, new Point(middle.X + offset, y), new Point(middle.X + offset, middle.Y + offset));
+            if ((edges & 8) != 0) dc.DrawLine(pen, new Point(middle.X + offset, middle.Y + offset), new Point(middle.X + offset, y + _lineHeight));
+        }
+        return true;
+    }
+}

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../src/SdqTerminal/AppVersion.cs" Link="AppVersion.cs" />
+    <Compile Include="../../src/SdqTerminal/Terminal/TerminalBuffer.cs" Link="TerminalBuffer.cs" />
+    <Compile Include="../../src/SdqTerminal/Terminal/SmartRtl.cs" Link="SmartRtl.cs" />
+    <Compile Include="../../src/SdqTerminal/Services/WslPath.cs" Link="WslPath.cs" />
+    <Compile Include="../../src/SdqTerminal/Services/ShellPath.cs" Link="ShellPath.cs" />
+    <Compile Include="../../src/SdqTerminal/Terminal/TerminalEnvironment.cs" Link="TerminalEnvironment.cs" />
+  </ItemGroup>
+</Project>

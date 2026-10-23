@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+
+
+  <PropertyGroup>
+
+    <OutputType>WinExe</OutputType>
+
+    <TargetFramework>net8.0-windows</TargetFramework>
+
+    <AssemblyName>SdqTerminal</AssemblyName>
+
+    <RootNamespace>SdqTerminal</RootNamespace>
+
+    <ApplicationIcon>Assets/SdqTerminal.ico</ApplicationIcon>
+
+    <Company>Sepehrsdq</Company>
+
+    <Authors>Sepehrsdq</Authors>
+
+    <Product>SdqTerminal</Product>
+
+    <Description>RTL-enabled terminal for Persian language users.</Description>
+
+    <Version>1.1.3</Version>
+
+    <Nullable>enable</Nullable>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <UseWPF>true</UseWPF>
+
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.Console.ConPTY" Version="1.25.260930003" GeneratePathProperty="true" ExcludeAssets="build;runtime;native" />
+    <Content Include="$(PkgMicrosoft_Windows_Console_ConPTY)/runtimes/win-x64/native/conpty.dll" Link="ConPty/x64/conpty.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <Content Include="$(PkgMicrosoft_Windows_Console_ConPTY)/build/native/runtimes/x64/OpenConsole.exe" Link="ConPty/x64/OpenConsole.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <Content Include="$(PkgMicrosoft_Windows_Console_ConPTY)/runtimes/win-x86/native/conpty.dll" Link="ConPty/x86/conpty.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <Content Include="$(PkgMicrosoft_Windows_Console_ConPTY)/build/native/runtimes/x86/OpenConsole.exe" Link="ConPty/x86/OpenConsole.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <Content Include="$(PkgMicrosoft_Windows_Console_ConPTY)/runtimes/win-arm64/native/conpty.dll" Link="ConPty/arm64/conpty.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <Content Include="$(PkgMicrosoft_Windows_Console_ConPTY)/build/native/runtimes/arm64/OpenConsole.exe" Link="ConPty/arm64/OpenConsole.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <Resource Include="Assets/SdqTerminal.ico" />
+  </ItemGroup>
+
+
+
+</Project>

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://sepehrsdq.github.io/SdqTerminal/sitemap.xml

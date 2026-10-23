@@ -1,0 +1,6 @@
+Copyright (c) 2026 Sepehrsdq
+
+SdqTerminal is licensed under the GNU General Public License, version 3.0 only (GPL-3.0-only).
+See the LICENSE file for the full license text.
+
+Note: Previously published MIT-licensed versions remain available under their original terms.

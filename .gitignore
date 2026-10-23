@@ -1,0 +1,27 @@
+.vs/
+.vscode/
+.idea/
+
+bin/
+obj/
+publish/
+release/
+binDebugnet8.0-windowsrtl-build/
+
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+TestResults/
+*.log
+
+.DS_Store
+Thumbs.db
+
+# Generated packages, previews and regression artifacts
+artifacts/
+
+# Release packages kept beside the sources
+/*-Setup-*.exe
+/*-Portable-*.zip
