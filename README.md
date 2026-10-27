@@ -44,7 +44,13 @@
 
 SdqTerminal uses the Windows ConPTY API and works with command-line environments such as Command Prompt, PowerShell, WSL, Bash, developer tools, package managers and interactive terminal applications.
 
-### What's new in 1.1.3
+### What's new in 1.1.4
+
+- The installer now supports Windows 10 version 1809 (build 17763) and newer instead of requiring version 2004.
+- A clear installer message names the minimum requirement (64-bit Windows 10 1809 or newer) and how to check it when a system does not qualify.
+- System requirements updated consistently in the English, Persian and Arabic README sections.
+
+### Highlights from 1.1.3
 
 - macOS-style window chrome: traffic lights on the left, flat pill tabs, one **☰** application menu, a find bar (`Ctrl+F`), a command palette (`Ctrl+Shift+P`), an RTL mode chip and a status bar.
 - **Tools → Macros**: interactive and timed recording, searchable management, a numbered step editor, pause/resume and single-step playback.
@@ -138,11 +144,11 @@ inside SdqTerminal with Smart RTL enabled.
 
 ### System Requirements
 
-- Windows 10 version 2004 (build 19041) or newer
+- Windows 10 version 1809 (build 17763) or newer
 - Windows 11
 - x64 processor for the provided release configuration
 
-Windows 10 version 2004 (build 19041) is the minimum supported version because SdqTerminal ships the modern Microsoft ConPTY host. Windows 7 and Windows 10 versions older than 2004 (build 19041) are not supported by the current backend.
+Windows 10 version 1809 (build 17763) is the minimum supported version because the ConPTY console API was introduced in that release and SdqTerminal ships Microsoft's ConPTY host, which supports Windows 10 build 17763 and newer. Windows 7 and Windows 10 versions older than 1809 are not supported by the current backend. WSL profiles start in the home directory only on Windows 10 version 2004 (build 19041) and later.
 
 ### Installation
 
@@ -163,7 +169,7 @@ GitHub Releases currently provides the installer. To use a portable build, publi
 
 Requirements:
 
-- Windows 10 version 2004 (build 19041) or newer
+- Windows 10 version 1809 (build 17763) or newer
 - .NET 8 SDK
 - Visual Studio 2022 with WPF support, or the .NET CLI
 - Inno Setup 6 when building the installer
@@ -347,7 +353,13 @@ This project is licensed under the **GNU General Public License, version 3 (GPLv
 
 این برنامه با استفاده از Windows ConPTY می‌تواند محیط‌هایی مانند Command Prompt، PowerShell، WSL، Bash، ابزارهای توسعه، package managerها و برنامه‌های تعاملی ترمینال را اجرا کند.
 
-### تغییرات نسخهٔ 1.1.3
+### تغییرات نسخهٔ 1.1.4
+
+- پشتیبانی نصب‌کننده از ویندوز ۱۰ نسخه ۱۸۰۹ (build 17763) و جدیدتر، به‌جای الزام نسخه ۲۰۰۴.
+- پیام روشن نصب‌کننده هنگام نداشتن حداقل نیازمندی‌ها، همراه با روش بررسی نسخهٔ ویندوز.
+- هم‌تراز شدن نیازمندی‌های سیستم در بخش‌های انگلیسی، فارسی و عربی README.
+
+### تغییرات مهم نسخهٔ 1.1.3
 
 - ظاهر مک‌مانند: دکمه‌های ترافیکلایت سمت چپ، تب‌های قرصی، منوی **☰**، نوار جستجو با `Ctrl+F`، پالت فرمان با `Ctrl+Shift+P`، چیپ حالت RTL و نوار وضعیت.
 - منوی **Tools → Macros** برای ضبط تعاملی و زمانی، مدیریت قابل جست‌وجو، ویرایش مراحل شماره‌دار، مکث و اجرای مرحله‌ای.
@@ -418,11 +430,11 @@ This project is licensed under the **GNU General Public License, version 3 (GPLv
 
 ### نیازمندی‌های سیستم
 
-- ویندوز ۱۰ نسخه 2004 (build 19041) یا جدیدتر
+- ویندوز ۱۰ نسخه ۱۸۰۹ (build 17763) یا جدیدتر
 - ویندوز ۱۱
 - پردازنده ۶۴ بیتی برای خروجی فعلی
 
-نسخه 2004 (build 19041) ویندوز ۱۰ حداقل نسخه پشتیبانی‌شده است، زیرا برنامه از API مربوط به Windows ConPTY استفاده می‌کند. ویندوز ۷ و نسخه‌های قدیمی‌تر ویندوز ۱۰ در backend فعلی پشتیبانی نمی‌شوند.
+نسخه ۱۸۰۹ (build 17763) ویندوز ۱۰ حداقل نسخه پشتیبانی‌شده است، زیرا API کان‌پیتی (ConPTY) از همان نسخه معرفی شده و برنامه از میزبان ConPTY مایکروسافت استفاده می‌کند که از build 17763 به بعد پشتیبانی می‌شود. ویندوز ۷ و نسخه‌های قدیمی‌تر ویندوز ۱۰ پشتیبانی نمی‌شوند. تب‌های WSL فقط روی ویندوز ۱۰ نسخه 2004 (build 19041) و جدیدتر در پوشهٔ خانه شروع می‌شوند.
 
 ### نصب
 
@@ -520,7 +532,13 @@ git push origin main
 
 يعتمد البرنامج على Windows ConPTY، ويمكنه تشغيل Command Prompt وPowerShell وWSL وBash وأدوات المطورين ومديري الحزم وتطبيقات CLI وTUI.
 
-### الجديد في الإصدار 1.1.3
+### الجديد في الإصدار 1.1.4
+
+- يدعم المثبّت الآن Windows 10 الإصدار 1809 (build 17763) وما بعده بدلاً من اشتراط الإصدار 2004.
+- رسالة واضحة من المثبّت تذكر الحد الأدنى المطلوب (نظام 64-bit وWindows 10 الإصدار 1809 أو أحدث) وكيفية التحقق منه عند عدم استيفاء المتطلبات.
+- تحديث متطلبات النظام بشكل موحّد في أقسام README الإنجليزية والفارسية والعربية.
+
+### أبرز تغييرات الإصدار 1.1.3
 
 - واجهة بأسلوب macOS: أزرار الإشارة يساراً، وعلامات تبويب مسطحة، وقائمة **☰** واحدة، وشريط بحث بـ `Ctrl+F`، ولوحة أوامر بـ `Ctrl+Shift+P`، وchip لاتجاه RTL وشريط حالة.
 - قائمة **Tools → Macros** للتسجيل التفاعلي والزمني، والبحث، وتحرير الخطوات المرقّمة، والإيقاف المؤقت والتنفيذ خطوة بخطوة.
@@ -591,11 +609,11 @@ git push origin main
 
 ### متطلبات النظام
 
-- Windows 10 الإصدار 2004 (build 19041) أو أحدث
+- Windows 10 الإصدار 1809 (build 17763) أو أحدث
 - Windows 11
 - معالج x64 لإصدار التوزيع الحالي
 
-الإصدار 2004 (build 19041) من Windows 10 هو الحد الأدنى لأن البرنامج يستخدم Windows ConPTY. لا يدعم backend الحالي نظام Windows 7 أو إصدارات Windows 10 الأقدم.
+الإصدار 1809 (build 17763) من Windows 10 هو الحد الأدنى المدعوم، لأن واجهة ConPTY أُضيفت في ذلك الإصدار ويعتمد البرنامج على مضيف ConPTY من مايكروسوفت الذي يدعم الإصدار 17763 وما بعده. لا يدعم backend الحالي نظام Windows 7 أو إصدارات Windows 10 الأقدم من 1809. تبدأ ملفات تعريف WSL في المجلد الرئيسي فقط على الإصدار 2004 (build 19041) وما بعده.
 
 ### التثبيت
 

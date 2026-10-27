@@ -22,7 +22,7 @@
 
     <Description>RTL-enabled terminal for Persian language users.</Description>
 
-    <Version>1.1.3</Version>
+    <Version>1.1.4</Version>
 
     <Nullable>enable</Nullable>
 

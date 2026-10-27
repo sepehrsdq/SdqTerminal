@@ -28,12 +28,19 @@ VersionInfoVersion={#AppVersion}.0
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
-MinVersion=10.0.19041
+; Windows 10 1809 (build 17763) is the real floor: the ConPTY API exists only
+; from that release, and the shipped Microsoft ConPTY host supports build 17763+.
+MinVersion=10.0.17763
 CloseApplications=yes
 RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+
+; Inno Setup's default wording does not name the requirement, and the same
+; message is shown for both an unsupported Windows version and a non-64-bit system.
+[Messages]
+WindowsVersionNotSupported=SdqTerminal requires 64-bit Windows 10 version 1809 (build 17763) or newer.%n%nRun "winver" to check this computer's Windows version.
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
