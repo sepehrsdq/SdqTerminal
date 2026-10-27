@@ -8,7 +8,7 @@ before reporting an issue when possible.
 
 | Version | Security updates |
 | --- | --- |
-| Latest stable release (currently 1.1.2) | Supported |
+| Latest stable release (currently 1.1.4) | Supported |
 | Older releases | Not supported; upgrade to the latest stable release |
 | Development builds and prereleases | Best effort; no guaranteed security support |
 
