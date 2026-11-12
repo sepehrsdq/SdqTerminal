@@ -22,6 +22,12 @@ Thumbs.db
 # Generated packages, previews and regression artifacts
 artifacts/
 
+# Local secrets and machine-specific settings
+.env
+.env.*
+!.env.example
+*.local.json
+
 # Release packages kept beside the sources
 /*-Setup-*.exe
 /*-Portable-*.zip
